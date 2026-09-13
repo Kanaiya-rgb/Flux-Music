@@ -43,12 +43,18 @@ import androidx.compose.foundation.gestures.verticalDrag
 import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.TextButton
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.ui.draw.BlurredEdgeTreatment
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.ui.graphics.StrokeCap
@@ -84,6 +90,7 @@ import androidx.compose.material.icons.automirrored.rounded.QueueMusic
 import androidx.compose.material.icons.automirrored.rounded.VolumeDown
 import androidx.compose.material.icons.automirrored.rounded.VolumeUp
 import androidx.compose.material.icons.rounded.Cast
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DragHandle
 import androidx.compose.material.icons.rounded.FastForward
@@ -94,6 +101,10 @@ import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.SurroundSound
+import com.music.dhvani.data.settings.AudioListeningMode
+import com.music.dhvani.playback.DolbyUtils
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -179,6 +190,7 @@ import androidx.media3.common.Player
 import coil3.compose.AsyncImage
 import coil3.compose.AsyncImagePainter
 import coil3.request.ImageRequest
+import com.music.dhvani.data.model.ROW_ART_PX
 import com.music.dhvani.ui.rememberIsForeground
 import com.music.dhvani.ui.components.thumbnailBorder
 import com.music.dhvani.ui.haptics.Haptic
@@ -1086,6 +1098,28 @@ fun NowPlayingScreen(
         // why the palette is passed as one immutable value.
         MeshGradientBackground(palette = meshColors, trackKey = song.videoId)
 
+        // Full-screen ambient blurred artwork backdrop (Apple Music style depth)
+        AsyncImage(
+            model = ImageRequest.Builder(context)
+                .data(song.artworkAt(ROW_ART_PX))
+                .build(),
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .fillMaxSize()
+                .blur(50.dp)
+                .graphicsLayer {
+                    alpha = 0.55f
+                },
+        )
+
+        // Frosted dark overlay scrim to keep all lyrics, seekers and controls crystal clear
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.32f)),
+        )
+
         // The artwork, edge to edge and running up behind the status bar,
         // dissolving into the backdrop where the sleeve's bottom edge would
         // have been. It lives out here rather than in the sleeve because that
@@ -1354,6 +1388,7 @@ fun NowPlayingScreen(
             // controls at the foot of the screen. Filled in from inside the box,
             // where the sleeve's real size is known; see [lastControlSpread].
             var controlSpread by remember { mutableStateOf(lastControlSpread) }
+            var showQualityInfoDialog by remember { mutableStateOf(false) }
             BoxWithConstraints(
                 modifier = Modifier
                     .weight(1f)
@@ -2161,7 +2196,7 @@ fun NowPlayingScreen(
             // lossless fetch is actually in flight, not on every buffering
             // YouTube track.
             val losslessRequested =
-                (if (metered == true) cellularQuality else wifiQuality) == AudioQuality.HIGH
+                (if (metered == true) cellularQuality else wifiQuality) == AudioQuality.LOSSLESS
             // Whether a module is still racing YouTube for this exact track —
             // see [NerdStats.racingLossless]. YouTube can win that race and
             // already be playing while the module lookup is still running
@@ -2202,9 +2237,186 @@ fun NowPlayingScreen(
                     stillRacing = stillRacing,
                     losslessRequested = losslessRequested,
                     nerdStats = nerdStats,
+                    onClick = { showQualityInfoDialog = true },
                     modifier = Modifier
                         .align(Alignment.Center)
                         .padding(horizontal = 8.dp),
+                )
+            }
+
+            if (showQualityInfoDialog) {
+                val context = LocalContext.current
+                val hasDolby = remember(context) { DolbyUtils.isDolbyAtmosAvailable(context) }
+                val listeningMode by AppSettings.audioListeningMode.collectAsStateWithLifecycle()
+                val dolbyActive = AppSettings.dolbyAtmosEnabled.collectAsStateWithLifecycle().value || nerdStats?.isDolbyAtmos == true
+                val currentCeiling = if (metered == true) cellularQuality else wifiQuality
+                AlertDialog(
+                    onDismissRequest = { showQualityInfoDialog = false },
+                    icon = {
+                        Icon(
+                            imageVector = when (listeningMode) {
+                                AudioListeningMode.BOTH, AudioListeningMode.DOLBY_ATMOS -> Icons.Rounded.SurroundSound
+                                AudioListeningMode.LOSSLESS -> Icons.Rounded.GraphicEq
+                                AudioListeningMode.STANDARD -> Icons.Rounded.Headphones
+                            },
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(28.dp),
+                        )
+                    },
+                    title = {
+                        Text(
+                            text = "Listening Mode & Quality",
+                            style = MaterialTheme.typography.titleMedium,
+                            textAlign = TextAlign.Center,
+                        )
+                    },
+                    text = {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .verticalScroll(rememberScrollState()),
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            Text(
+                                text = "Choose Audio Mode",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+
+                            AudioListeningMode.entries.forEach { mode ->
+                                val requiresDolby = mode == AudioListeningMode.DOLBY_ATMOS || mode == AudioListeningMode.BOTH
+                                val isSupported = !requiresDolby || hasDolby
+                                val isSelected = mode == listeningMode && isSupported
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(
+                                            if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)
+                                            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = if (isSupported) 0.5f else 0.2f)
+                                        )
+                                        .then(
+                                            if (isSupported) {
+                                                Modifier.clickable {
+                                                    AppSettings.applyListeningMode(mode)
+                                                }
+                                            } else Modifier
+                                        )
+                                        .alpha(if (isSupported) 1f else 0.45f)
+                                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(
+                                                text = mode.label,
+                                                style = MaterialTheme.typography.bodyLarge,
+                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                                color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                            )
+                                            if (!isSupported) {
+                                                Spacer(Modifier.width(8.dp))
+                                                Text(
+                                                    text = "Not Supported",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = MaterialTheme.colorScheme.error,
+                                                    modifier = Modifier
+                                                        .background(
+                                                            MaterialTheme.colorScheme.error.copy(alpha = 0.12f),
+                                                            RoundedCornerShape(4.dp)
+                                                        )
+                                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                                )
+                                            }
+                                        }
+                                        Text(
+                                            text = if (!isSupported) "Hardware Dolby Atmos is not available on this phone" else mode.subtitle,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                    if (isSelected) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.Check,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(20.dp),
+                                        )
+                                    }
+                                }
+                            }
+
+                            HorizontalDivider(
+                                thickness = 0.5.dp,
+                                color = MaterialTheme.colorScheme.outlineVariant,
+                                modifier = Modifier.padding(vertical = 4.dp),
+                            )
+
+                            Text(
+                                text = "Active Stream Stats",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+
+                            val codec = codecLabel(nerdStats?.mimeType) ?: (if (nerdStats?.isLossless == true) "FLAC" else "Opus / AAC")
+                            val sampleRate = nerdStats?.sampleRateHz?.let { "%.1f kHz".format(Locale.ROOT, it / 1000f) } ?: "44.1 kHz"
+                            val bitDepth = nerdStats?.bitDepth?.let { "$it-bit" } ?: (if (nerdStats?.isLossless == true) "16-bit" else "16-bit")
+                            val bitrate = nerdStats?.bitrateKbps?.let { "$it kbps" } ?: (if (nerdStats?.isLossless == true) "Lossless (~1411 kbps)" else "Standard")
+
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("Quality Tier", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(if (nerdStats?.isLossless == true) "Bit-Exact Lossless" else "Compressed Audio", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                            }
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("Format / Codec", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(codec, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                            }
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("Sample Rate", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(sampleRate, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                            }
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("Bit Depth", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(bitDepth, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                            }
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("Bitrate", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(bitrate, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                            }
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("Dolby Atmos / Spatial", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(if (dolbyActive) "Active (3D Stage)" else "Off", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, color = if (dolbyActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
+                            }
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("Streaming Ceiling", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text("${currentCeiling.label} (${if (metered == true) "Mobile" else "Wi-Fi"})", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                            }
+
+                            val wantsLossless = listeningMode == AudioListeningMode.LOSSLESS || listeningMode == AudioListeningMode.BOTH
+                            if (wantsLossless && nerdStats?.isLossless != true) {
+                                Spacer(Modifier.height(8.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                                ) {
+                                    Text(
+                                        text = "ℹ️ YouTube Music max stream is 326 kbps Opus/AAC. To stream 1411 kbps FLAC, configure a Lossless Module in Settings > Sources or play local .flac audio.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                        }
+                    },
+                    confirmButton = {
+                        TextButton(onClick = { showQualityInfoDialog = false }) {
+                            Text("Done")
+                        }
+                    },
                 )
             }
 
@@ -6232,46 +6444,11 @@ private fun LosslessOrStats(
     losslessRequested: Boolean,
     nerdStats: NerdStats.Snapshot?,
     modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null,
 ) {
     when {
-        // Still resolving — either the player itself is buffering, or a
-        // module is still racing YouTube for this track in the background
-        // (see [NerdStats.racingLossless]) even though YouTube already won
-        // and is audible. Either way nothing measured yet to confirm with,
-        // so this is a statement of intent, not a result — no shimmer, so
-        // it never reads as "confirmed" before it is.
-        // [stillRacing] on its own, not gated on the lossless preference: a
-        // module outranks YouTube on the strength of the source order alone,
-        // so the lookup runs — and can come back lossless — with that switch
-        // off. Gating this on it left the badge blank through the wait and
-        // then jumped straight to "Hi-Res Lossless".
-        // The [isLoading] half is gated on `nerdStats == null` rather than
-        // `nerdStats?.isLossless != true`: `isLoading` is just
-        // `STATE_BUFFERING`, which a seek trips for a track whose quality
-        // question was already settled — swallowing back into cache still
-        // rebuffers. Gating on `!= true` read that rebuffer as "resolving"
-        // again and flashed "Upgrading Quality" over a track already known
-        // to be, say, Hi-Quality with no lossless copy anywhere. Once
-        // [nerdStats] exists there is something measured to show instead, so
-        // only a genuinely unmeasured track — or a real race via
-        // [stillRacing] — earns this label.
         (stillRacing && nerdStats?.isLossless != true) ||
             (isLoading && losslessRequested && nerdStats == null) -> LosslessLabel(
-            // What is already true, ahead of what is still being looked for.
-            // A race running over JioSaavn's 320kbps AAC and one running over
-            // YouTube's 160kbps Opus were both drawn as a bare "Upgrading
-            // Quality", which reads as "this is not good yet" — wrong on the
-            // first, where the track is already at the top of what lossy gets
-            // and the search is only chasing a lossless copy that may not
-            // exist. Naming the floor first makes the label describe a track
-            // rather than a wait.
-            //
-            // Decided on [NerdStats.Snapshot.isHiQuality] rather than on which
-            // source won, for the reason that property already gives: a
-            // 320kbps stream is a 320kbps stream wherever it came from. It
-            // reads the claimed rate when nothing is measured yet, so a
-            // JioSaavn stream qualifies from its first frame; YouTube's Opus
-            // sits under the threshold and keeps the plain label it had.
             text = if (nerdStats?.isHiQuality == true) {
                 "Hi-Quality, Upgrading Quality"
             } else {
@@ -6279,34 +6456,53 @@ private fun LosslessOrStats(
             },
             animated = false,
             modifier = modifier,
+            onClick = onClick,
         )
-        nerdStats?.isLossless == true -> LosslessLabel(
-            // Same line Tidal, Qobuz and Apple Music draw it at — see
-            // [NerdStats.Snapshot.isHiRes].
-            text = if (nerdStats.isHiRes) "Hi-Res Lossless" else "Lossless",
-            // Shimmer is reserved for the thing that was asked for and
-            // confirmed. It is what makes the badge read as an achievement
-            // rather than a label, which only one of these two is.
+        nerdStats?.isDolbyAtmos == true && nerdStats.isLossless -> LosslessLabel(
+            text = "Dolby Atmos • Lossless",
             animated = true,
             modifier = modifier,
+            onClick = onClick,
         )
-        // Lossy, but the good end of lossy — a module's 320kbps tier, which
-        // for a great many tracks is the best copy that exists anywhere the
-        // app can reach. See [NerdStats.Snapshot.isHiQuality].
+        nerdStats?.isDolbyAtmos == true -> LosslessLabel(
+            text = "Dolby Atmos",
+            animated = true,
+            modifier = modifier,
+            onClick = onClick,
+        )
+        nerdStats?.isLossless == true -> LosslessLabel(
+            text = if (nerdStats.isHiRes) "Hi-Res Lossless" else "Lossless",
+            animated = true,
+            modifier = modifier,
+            onClick = onClick,
+        )
         nerdStats?.isHiQuality == true -> LosslessLabel(
             text = "Hi-Quality",
             animated = false,
             modifier = modifier,
+            onClick = onClick,
         )
-        else -> {}
+        else -> LosslessLabel(
+            text = "Stereo",
+            animated = false,
+            modifier = modifier,
+            onClick = onClick,
+        )
     }
 }
 
 /** A headphone glyph ahead of the quality tag — "Upgrading Quality", "Hi-Quality", "Lossless". */
 @Composable
-private fun LosslessLabel(text: String, animated: Boolean, modifier: Modifier = Modifier) {
+private fun LosslessLabel(
+    text: String,
+    animated: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null,
+) {
     Row(
-        modifier = modifier,
+        modifier = modifier
+            .then(if (onClick != null) Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onClick) else Modifier)
+            .padding(horizontal = 4.dp, vertical = 2.dp),
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically,
     ) {

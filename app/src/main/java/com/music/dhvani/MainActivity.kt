@@ -267,6 +267,17 @@ private fun DhvaniApp(
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
     val hazeState = remember { HazeState() }
+    val notifyPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+        onResult = { /* handled */ }
+    )
+    LaunchedEffect(Unit) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                notifyPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+    }
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
     // Whether there is room to keep the player open beside the page rather than
     // raising it over one. Read all over what follows, because most of what the
@@ -970,24 +981,21 @@ private fun DhvaniApp(
     var downloadPendingFrom by remember { mutableStateOf<DownloadTarget?>(null) }
     var showNotificationPermissionPrompt by remember { mutableStateOf(false) }
 
+    val notifyPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { /* Refusing costs the progress notification, not the download. */ }
+
     LaunchedEffect(Unit) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             val hasPerm = ContextCompat.checkSelfPermission(
                 context,
                 Manifest.permission.POST_NOTIFICATIONS,
             ) == PackageManager.PERMISSION_GRANTED
-            val prefs = context.getSharedPreferences("dhvani_prefs", Context.MODE_PRIVATE)
-            val alreadyPrompted = prefs.getBoolean("notif_perm_prompted", false)
-            if (!hasPerm && !alreadyPrompted) {
-                prefs.edit().putBoolean("notif_perm_prompted", true).apply()
-                showNotificationPermissionPrompt = true
+            if (!hasPerm) {
+                notifyPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
             }
         }
     }
-
-    val notifyPermission = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission(),
-    ) { /* Refusing costs the progress notification, not the download. */ }
     val storagePermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
@@ -1595,6 +1603,7 @@ private fun DhvaniApp(
                     } else if (key == "sources") {
                         SourcesScreen(
                             contentPadding = listPadding,
+                            onBack = { showSources = false },
                             onEditCustomModule = {
                                 customModuleInput = SourceRegistry.customModule()?.baseUrl.orEmpty()
                                 customModuleAlert = true

@@ -455,7 +455,7 @@ private fun PlaylistShelf(
         },
         leadingCardSecond = {
             NewShelfCard(
-                icon = Icons.Rounded.FileUpload,
+                icon = Icons.Rounded.FileDownload,
                 label = "Import playlist",
                 subtitle = "M3U, JSON or link",
                 onClick = onImportPlaylist,
@@ -463,7 +463,7 @@ private fun PlaylistShelf(
         },
         leadingCardThird = {
             NewShelfCard(
-                icon = Icons.Rounded.FileDownload,
+                icon = Icons.Rounded.FileUpload,
                 label = "Export playlist",
                 subtitle = "Save as M3U or JSON",
                 onClick = onExportPlaylist,
@@ -571,7 +571,7 @@ fun LibraryGridPage(
             if (onImportPlaylist != null) {
                 item(key = "leading_second") {
                     NewShelfCard(
-                        icon = Icons.Rounded.FileUpload,
+                        icon = Icons.Rounded.FileDownload,
                         label = "Import playlist",
                         subtitle = "M3U, JSON or link",
                         onClick = onImportPlaylist,
@@ -582,7 +582,7 @@ fun LibraryGridPage(
             if (onExportPlaylist != null) {
                 item(key = "leading_export") {
                     NewShelfCard(
-                        icon = Icons.Rounded.FileDownload,
+                        icon = Icons.Rounded.FileUpload,
                         label = "Export playlist",
                         subtitle = "Save as M3U or JSON",
                         onClick = onExportPlaylist,

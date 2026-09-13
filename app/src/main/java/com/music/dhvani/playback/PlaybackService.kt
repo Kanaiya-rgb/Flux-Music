@@ -1,6 +1,9 @@
 package com.music.dhvani.playback
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.app.PendingIntent
+import androidx.core.app.NotificationCompat
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -8,6 +11,7 @@ import android.content.IntentFilter
 import android.media.AudioDeviceCallback
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
+import android.media.audiofx.AudioEffect
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -25,6 +29,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.Timeline
 import androidx.media3.common.audio.SonicAudioProcessor
 import androidx.media3.common.util.UnstableApi
+import com.music.dhvani.playback.audio.LosslessStallWatchdogAudioProcessor
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
@@ -155,6 +160,12 @@ class PlaybackService : MediaSessionService() {
     private val transitionFilterB = TransitionFilterProcessor()
     private val equalizerProcessorA = com.music.dhvani.playback.eq.CustomEqualizerAudioProcessor()
     private val equalizerProcessorB = com.music.dhvani.playback.eq.CustomEqualizerAudioProcessor()
+    private val losslessWatchdogA = LosslessStallWatchdogAudioProcessor {
+        TrackLog.w("DhvaniMusic", "Lossless stall detected on player A")
+    }.apply { armed = true }
+    private val losslessWatchdogB = LosslessStallWatchdogAudioProcessor {
+        TrackLog.w("DhvaniMusic", "Lossless stall detected on player B")
+    }.apply { armed = true }
 
     private var activeFilter: TransitionFilterProcessor = transitionFilterA
     private var spareFilter: TransitionFilterProcessor = transitionFilterB
@@ -367,6 +378,7 @@ class PlaybackService : MediaSessionService() {
             } else {
                 clearDiscordPresence()
             }
+            updateStatusBarNotification()
         }
 
         /**
@@ -403,6 +415,8 @@ class PlaybackService : MediaSessionService() {
         }
 
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            losslessWatchdogA.resetForNewTrack()
+            losslessWatchdogB.resetForNewTrack()
             // The player this fired on, which is by definition the one the
             // session is currently pointed at.
             val exoPlayer = player ?: return
@@ -643,13 +657,35 @@ class PlaybackService : MediaSessionService() {
         NerdStats.forgetLastSession()
         QualityUpgrade.forgetLastSession()
 
-        setMediaNotificationProvider(
-            DefaultMediaNotificationProvider.Builder(this)
-                .setChannelId(CHANNEL_ID)
-                .setChannelName(R.string.playback_channel_name)
-                .build()
-                .apply { setSmallIcon(R.drawable.ic_notification_logo) },
-        )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+            val channel = NotificationChannel(
+                CHANNEL_ID,
+                getString(R.string.playback_channel_name),
+                NotificationManager.IMPORTANCE_DEFAULT,
+            ).apply {
+                description = "Playback controls and status bar notification"
+                setShowBadge(true)
+                setSound(null, null)
+                enableLights(false)
+                enableVibration(false)
+            }
+            notificationManager?.createNotificationChannel(channel)
+        }
+
+        scope.launch {
+            AppSettings.showStatusBarIcon.collectLatest { showIcon ->
+                val iconRes = if (showIcon) R.drawable.ic_notification_logo else R.drawable.ic_notification_empty
+                setMediaNotificationProvider(
+                    DefaultMediaNotificationProvider.Builder(this@PlaybackService)
+                        .setChannelId(CHANNEL_ID)
+                        .setChannelName(R.string.playback_channel_name)
+                        .build()
+                        .apply { setSmallIcon(iconRes) },
+                )
+                updateStatusBarNotification()
+            }
+        }
 
         // The player screen toggles QueueShuffle directly on its MediaController.
         // Observe the shared state here so the notification's Shuffle icon and
@@ -841,8 +877,8 @@ class PlaybackService : MediaSessionService() {
         mediaSourceFactory = DefaultMediaSourceFactory(AudioCache.playbackFactory(defaultDataSourceFactory))
             .setLoadErrorHandlingPolicy(PermanentAwareLoadErrorPolicy())
 
-        val exoPlayer = buildPlayer(spatialAudioProcessorA, transitionFilterA, equalizerProcessorA, ownsSession = true)
-        val sparePlayer = buildPlayer(spatialAudioProcessorB, transitionFilterB, equalizerProcessorB, ownsSession = false)
+        val exoPlayer = buildPlayer(spatialAudioProcessorA, transitionFilterA, equalizerProcessorA, losslessWatchdogA, ownsSession = true)
+        val sparePlayer = buildPlayer(spatialAudioProcessorB, transitionFilterB, equalizerProcessorB, losslessWatchdogB, ownsSession = false)
         player = exoPlayer
         spare = sparePlayer
 
@@ -1127,9 +1163,10 @@ class PlaybackService : MediaSessionService() {
         spatial: SpatialAudioProcessor,
         filter: TransitionFilterProcessor,
         equalizer: com.music.dhvani.playback.eq.CustomEqualizerAudioProcessor,
+        watchdog: LosslessStallWatchdogAudioProcessor,
         ownsSession: Boolean,
     ): ExoPlayer = ExoPlayer.Builder(this)
-        .setRenderersFactory(silenceSkippingRenderers(spatial, filter, equalizer))
+        .setRenderersFactory(silenceSkippingRenderers(spatial, filter, equalizer, watchdog))
         .setMediaSourceFactory(requireNotNull(mediaSourceFactory))
         .setLoadControl(farBufferingLoadControl())
         .setAudioAttributes(AUDIO_ATTRIBUTES, /* handleAudioFocus = */ ownsSession)
@@ -1371,6 +1408,7 @@ class PlaybackService : MediaSessionService() {
         // Covers crossfades too: a blended advance never reaches
         // onMediaItemTransition, and [adoptPlayer] calls this handler by hand.
         publishWidgetState()
+        updateStatusBarNotification()
         // Cleared rather than re-published. The renderer is still
         // configured for the track that just ended at this point, so
         // reading the format here reports the *previous* song — which
@@ -2908,6 +2946,7 @@ class PlaybackService : MediaSessionService() {
         spatial: SpatialAudioProcessor,
         transition: TransitionFilterProcessor,
         equalizer: com.music.dhvani.playback.eq.CustomEqualizerAudioProcessor,
+        watchdog: LosslessStallWatchdogAudioProcessor,
     ) = object : DefaultRenderersFactory(this) {
         override fun buildAudioSink(
             context: Context,
@@ -2919,7 +2958,7 @@ class PlaybackService : MediaSessionService() {
             .setAudioProcessorChain(
                 DefaultAudioSink.DefaultAudioProcessorChain(
                     // Equalizer first so frequency shaping runs before spatial widening and transition filtering
-                    arrayOf(equalizer, spatial, transition),
+                    arrayOf(equalizer, spatial, transition, watchdog),
                     SilenceSkippingAudioProcessor(
                         MIN_SILENCE_US,
                         SilenceSkippingAudioProcessor.DEFAULT_SILENCE_RETENTION_RATIO,
@@ -2965,10 +3004,31 @@ class PlaybackService : MediaSessionService() {
             }
         }
         scope.launch {
-            AppSettings.spatialAudio.collect {
-                spatialAudioProcessorA.enabled = it
-                spatialAudioProcessorB.enabled = it
+            combine(AppSettings.spatialAudio, AppSettings.dolbyAtmosEnabled) { spatial, dolby ->
+                spatial || dolby
+            }.collect { active ->
+                spatialAudioProcessorA.enabled = active
+                spatialAudioProcessorB.enabled = active
+                applyDolbyAudioSessionEffect(active)
             }
+        }
+    }
+
+    private fun applyDolbyAudioSessionEffect(active: Boolean) {
+        val sessionId = player?.audioSessionId ?: return
+        if (sessionId == 0) return
+        try {
+            val intent = Intent(
+                if (active) AudioEffect.ACTION_OPEN_AUDIO_EFFECT_CONTROL_SESSION
+                else AudioEffect.ACTION_CLOSE_AUDIO_EFFECT_CONTROL_SESSION
+            ).apply {
+                putExtra(AudioEffect.EXTRA_AUDIO_SESSION, sessionId)
+                putExtra(AudioEffect.EXTRA_PACKAGE_NAME, packageName)
+                putExtra(AudioEffect.EXTRA_CONTENT_TYPE, AudioEffect.CONTENT_TYPE_MUSIC)
+            }
+            sendBroadcast(intent)
+        } catch (e: Exception) {
+            Log.w("PlaybackService", "Failed to broadcast audio effect session", e)
         }
     }
 
@@ -3272,6 +3332,7 @@ class PlaybackService : MediaSessionService() {
 
 
     override fun onDestroy() {
+        (getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager)?.cancel(STATUS_BAR_NOTIF_ID)
         unregisterAudioDeviceCallback()
         com.music.dhvani.playback.eq.EqualizerManager.unregisterProcessor(equalizerProcessorA)
         com.music.dhvani.playback.eq.EqualizerManager.unregisterProcessor(equalizerProcessorB)
@@ -3388,6 +3449,59 @@ class PlaybackService : MediaSessionService() {
         audioDeviceCallback = null
     }
 
+    private fun updateStatusBarNotification() {
+        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
+        val showIcon = com.music.dhvani.data.settings.AppSettings.showStatusBarIcon.value
+        val exoPlayer = player
+        val isPlaying = exoPlayer?.isPlaying == true
+        val song = exoPlayer?.currentMediaItem?.toSong()
+
+        if (!showIcon || !isPlaying || song == null) {
+            notificationManager.cancel(STATUS_BAR_NOTIF_ID)
+            return
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (androidx.core.content.ContextCompat.checkSelfPermission(
+                    this,
+                    android.Manifest.permission.POST_NOTIFICATIONS,
+                ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+            ) {
+                return
+            }
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                STATUS_BAR_CHANNEL_ID,
+                "Playback Status",
+                NotificationManager.IMPORTANCE_LOW,
+            ).apply {
+                description = "Shows Dhvani logo in the status bar while music is playing"
+                setShowBadge(true)
+                setSound(null, null)
+                enableLights(false)
+                enableVibration(false)
+            }
+            notificationManager.createNotificationChannel(channel)
+        }
+
+        val pendingIntent = sessionActivity()
+
+        val notification = NotificationCompat.Builder(this, STATUS_BAR_CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_notification_logo)
+            .setContentTitle(song.title)
+            .setContentText(song.artist)
+            .setContentIntent(pendingIntent)
+            .setOngoing(true)
+            .setSilent(true)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .build()
+
+        notificationManager.notify(STATUS_BAR_NOTIF_ID, notification)
+    }
+
     /**
      * What the MediaSession, and so every control surface, actually talks to.
      *
@@ -3448,6 +3562,8 @@ class PlaybackService : MediaSessionService() {
             .build()
 
         const val CHANNEL_ID = "dhvani_playback"
+        const val STATUS_BAR_CHANNEL_ID = "dhvani_status_icon"
+        const val STATUS_BAR_NOTIF_ID = 2002
         const val SESSION_ID = "DhvaniPlayback"
         const val ACTION_TOGGLE_FAVORITE = "com.music.dhvani.action.TOGGLE_FAVORITE"
 

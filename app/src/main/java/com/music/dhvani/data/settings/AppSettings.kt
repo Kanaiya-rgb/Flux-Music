@@ -9,6 +9,7 @@ import com.music.dhvani.BuildConfig
 import com.music.dhvani.auth.AuthStore
 import com.music.dhvani.data.lyrics.LyricsSource
 import com.music.dhvani.data.model.Song
+import com.music.dhvani.playback.DolbyUtils
 import kotlinx.coroutines.flow.MutableStateFlow
 
 /**
@@ -25,7 +26,35 @@ enum class AudioQuality(
 ) {
     LOW(64, "Low", "~64 kbps · smallest download", "29 MB/hr"),
     MEDIUM(128, "Medium", "~128 kbps · balanced", "58 MB/hr"),
-    HIGH(Int.MAX_VALUE, "High", "Best available · ~171 kbps Opus", "77 MB/hr"),
+    HIGH(256, "High", "Best standard · ~171-256 kbps", "77 MB/hr"),
+    LOSSLESS(Int.MAX_VALUE, "Lossless", "Hi-Res / FLAC · bit-exact if source has it", "~350 MB/hr"),
+}
+
+/**
+ * Listening mode preferences allowing users to quickly switch their acoustic experience:
+ * - [DOLBY_ATMOS]: 3D surround soundstage and spatial acoustic processing
+ * - [LOSSLESS]: Pure bit-exact master fidelity without spatial DSP
+ * - [BOTH]: Studio lossless streaming paired with 3D spatial surround stage
+ * - [STANDARD]: Original balanced stereo mix
+ */
+enum class AudioListeningMode(
+    val label: String,
+    val subtitle: String,
+) {
+    DOLBY_ATMOS("Dolby Atmos", "3D spatial soundstage & virtualized surround"),
+    LOSSLESS("Lossless Audio", "Pure bit-exact studio master (FLAC / ALAC)"),
+    BOTH("Dolby Atmos + Lossless", "Lossless audio with 3D spatial soundstage"),
+    STANDARD("Standard Stereo", "Original unenhanced stereo mix"),
+    ;
+
+    companion object {
+        fun fromMode(dolbyAtmos: Boolean, losslessCeiling: Boolean): AudioListeningMode = when {
+            dolbyAtmos && losslessCeiling -> BOTH
+            dolbyAtmos -> DOLBY_ATMOS
+            losslessCeiling -> LOSSLESS
+            else -> STANDARD
+        }
+    }
 }
 
 /**
@@ -211,6 +240,7 @@ enum class GridItemSize(val label: String) {
  */
 object AppSettings {
 
+    private var appContext: Context? = null
     private lateinit var prefs: SharedPreferences
 
     /** Only for the Discord token — everything else on here is plain prefs. */
@@ -270,6 +300,9 @@ object AppSettings {
      */
     val wifiOnlyDownloads = MutableStateFlow(false)
 
+    /** Whether to prompt the user to choose quality and network on every song download. */
+    val alwaysAskDownloadOptions = MutableStateFlow(false)
+
     /** Whether the active network charges for data. `null` while offline. */
     val meteredConnection = MutableStateFlow<Boolean?>(null)
 
@@ -302,6 +335,16 @@ object AppSettings {
      * us a stereo stream, so there's no Atmos-style source to render.
      */
     val spatialAudio = MutableStateFlow(false)
+
+    /**
+     * Whether Dolby Atmos / 3D spatial surround sound is toggled on.
+     */
+    val dolbyAtmosEnabled = MutableStateFlow(false)
+
+    /**
+     * Unified listening mode choice (Dolby Atmos, Lossless, Both, Standard).
+     */
+    val audioListeningMode = MutableStateFlow(AudioListeningMode.STANDARD)
     val playbackSpeed = MutableStateFlow(1.0f)
     val themeMode = MutableStateFlow(ThemeMode.DARK)
 
@@ -415,6 +458,9 @@ object AppSettings {
      * [NowPlayingScreen][com.music.dhvani.ui.player.NowPlayingScreen].
      */
     val fullBleedArtwork = MutableStateFlow(true)
+
+    /** Whether to show the Dhvani app icon in the top status bar during playback. */
+    val showStatusBarIcon = MutableStateFlow(true)
 
     /**
      * Time-synced lyrics on the player, lit up as they are sung.
@@ -622,6 +668,7 @@ object AppSettings {
         }
 
     fun init(context: Context) {
+        appContext = context.applicationContext
         prefs = context.getSharedPreferences("flux_settings", Context.MODE_PRIVATE)
         authStore = AuthStore(context)
         readAll()
@@ -660,10 +707,33 @@ object AppSettings {
         }
         downloadNetwork.value = networkMode
         wifiOnlyDownloads.value = (networkMode == DownloadNetwork.WIFI_ONLY)
+        alwaysAskDownloadOptions.value = prefs.getBoolean(KEY_ALWAYS_ASK_DOWNLOAD_OPTIONS, false)
         crossfadeSeconds.value = prefs.getInt(KEY_CROSSFADE, 0)
         smartFadeEnabled.value = prefs.getBoolean(KEY_SMART_FADE, false)
         skipSilence.value = prefs.getBoolean(KEY_SKIP_SILENCE, false)
         spatialAudio.value = prefs.getBoolean(KEY_SPATIAL_AUDIO, false)
+        val hasHardwareDolby = appContext?.let { DolbyUtils.isDolbyAtmosAvailable(it) } ?: false
+        val rawDolby = if (hasHardwareDolby) prefs.getBoolean(KEY_DOLBY_ATMOS_ENABLED, false) else false
+        dolbyAtmosEnabled.value = rawDolby
+        if (!hasHardwareDolby && prefs.getBoolean(KEY_DOLBY_ATMOS_ENABLED, false)) {
+            prefs.edit().putBoolean(KEY_DOLBY_ATMOS_ENABLED, false).apply()
+        }
+        val storedListeningMode = prefs.getString(KEY_AUDIO_LISTENING_MODE, null)
+        val initialMode = if (storedListeningMode != null) {
+            runCatching { AudioListeningMode.valueOf(storedListeningMode) }.getOrDefault(
+                AudioListeningMode.fromMode(rawDolby, audioQualityWifi.value == AudioQuality.LOSSLESS)
+            )
+        } else {
+            AudioListeningMode.fromMode(rawDolby, audioQualityWifi.value == AudioQuality.LOSSLESS)
+        }
+        audioListeningMode.value = if (!hasHardwareDolby && (initialMode == AudioListeningMode.DOLBY_ATMOS || initialMode == AudioListeningMode.BOTH)) {
+            if (initialMode == AudioListeningMode.BOTH || audioQualityWifi.value == AudioQuality.LOSSLESS) AudioListeningMode.LOSSLESS else AudioListeningMode.STANDARD
+        } else {
+            initialMode
+        }
+        if (audioListeningMode.value != initialMode) {
+            prefs.edit().putString(KEY_AUDIO_LISTENING_MODE, audioListeningMode.value.name).apply()
+        }
         playbackSpeed.value = prefs.getFloat(KEY_SPEED, 1.0f)
         themeMode.value = runCatching {
             ThemeMode.valueOf(prefs.getString(KEY_THEME, null) ?: "DARK")
@@ -730,6 +800,7 @@ object AppSettings {
         animatedCanvas.value = prefs.getBoolean(KEY_ANIMATED_CANVAS, true)
         canvasOverCellular.value = prefs.getBoolean(KEY_CANVAS_OVER_CELLULAR, false)
         fullBleedArtwork.value = prefs.getBoolean(KEY_FULL_BLEED_ARTWORK, true)
+        showStatusBarIcon.value = prefs.getBoolean(KEY_SHOW_STATUS_BAR_ICON, true)
         syncedLyrics.value = prefs.getBoolean(KEY_SYNCED_LYRICS, true)
         lyricsSources.value = readLyricsSources()
         lyricsSourceOrder.value = readLyricsSourceOrder()
@@ -884,11 +955,13 @@ object AppSettings {
     fun setAudioQualityWifi(value: AudioQuality) {
         audioQualityWifi.value = value
         prefs.edit().putString(KEY_QUALITY_WIFI, value.name).apply()
+        syncListeningMode()
     }
 
     fun setAudioQualityCellular(value: AudioQuality) {
         audioQualityCellular.value = value
         prefs.edit().putString(KEY_QUALITY_CELLULAR, value.name).apply()
+        syncListeningMode()
     }
 
     fun setDownloadQuality(value: DownloadQuality) {
@@ -909,6 +982,11 @@ object AppSettings {
         setDownloadNetwork(if (value) DownloadNetwork.WIFI_ONLY else DownloadNetwork.BOTH)
     }
 
+    fun setAlwaysAskDownloadOptions(value: Boolean) {
+        alwaysAskDownloadOptions.value = value
+        prefs.edit().putBoolean(KEY_ALWAYS_ASK_DOWNLOAD_OPTIONS, value).apply()
+    }
+
     fun setCrossfadeSeconds(value: Int) {
         crossfadeSeconds.value = value
         prefs.edit().putInt(KEY_CROSSFADE, value).apply()
@@ -927,6 +1005,54 @@ object AppSettings {
     fun setSpatialAudio(value: Boolean) {
         spatialAudio.value = value
         prefs.edit().putBoolean(KEY_SPATIAL_AUDIO, value).apply()
+    }
+
+    fun setDolbyAtmosEnabled(value: Boolean) {
+        dolbyAtmosEnabled.value = value
+        prefs.edit().putBoolean(KEY_DOLBY_ATMOS_ENABLED, value).apply()
+        if (value) {
+            setSpatialAudio(true)
+        }
+        syncListeningMode()
+    }
+
+    fun applyListeningMode(mode: AudioListeningMode) {
+        audioListeningMode.value = mode
+        prefs.edit().putString(KEY_AUDIO_LISTENING_MODE, mode.name).apply()
+        when (mode) {
+            AudioListeningMode.DOLBY_ATMOS -> {
+                dolbyAtmosEnabled.value = true
+                prefs.edit().putBoolean(KEY_DOLBY_ATMOS_ENABLED, true).apply()
+                setSpatialAudio(true)
+            }
+            AudioListeningMode.LOSSLESS -> {
+                dolbyAtmosEnabled.value = false
+                prefs.edit().putBoolean(KEY_DOLBY_ATMOS_ENABLED, false).apply()
+                setSpatialAudio(false)
+                setAudioQualityWifi(AudioQuality.LOSSLESS)
+                setAudioQualityCellular(AudioQuality.LOSSLESS)
+            }
+            AudioListeningMode.BOTH -> {
+                dolbyAtmosEnabled.value = true
+                prefs.edit().putBoolean(KEY_DOLBY_ATMOS_ENABLED, true).apply()
+                setSpatialAudio(true)
+                setAudioQualityWifi(AudioQuality.LOSSLESS)
+                setAudioQualityCellular(AudioQuality.LOSSLESS)
+            }
+            AudioListeningMode.STANDARD -> {
+                dolbyAtmosEnabled.value = false
+                prefs.edit().putBoolean(KEY_DOLBY_ATMOS_ENABLED, false).apply()
+                setSpatialAudio(false)
+            }
+        }
+    }
+
+    private fun syncListeningMode() {
+        val dolby = dolbyAtmosEnabled.value
+        val lossless = audioQualityWifi.value == AudioQuality.LOSSLESS || audioQualityCellular.value == AudioQuality.LOSSLESS
+        val mode = AudioListeningMode.fromMode(dolby, lossless)
+        audioListeningMode.value = mode
+        prefs.edit().putString(KEY_AUDIO_LISTENING_MODE, mode.name).apply()
     }
 
     fun setPlaybackSpeed(value: Float) {
@@ -1326,6 +1452,11 @@ object AppSettings {
         prefs.edit().putBoolean(KEY_FULL_BLEED_ARTWORK, value).apply()
     }
 
+    fun setShowStatusBarIcon(value: Boolean) {
+        showStatusBarIcon.value = value
+        prefs.edit().putBoolean(KEY_SHOW_STATUS_BAR_ICON, value).apply()
+    }
+
     /** Clamped to [DEFAULT_CACHE_LIMIT_BYTES]..[MAX_CACHE_LIMIT_BYTES] — the floor is the default, not zero. */
     fun setAudioCacheLimitBytes(value: Long) {
         val clamped = value.coerceIn(DEFAULT_CACHE_LIMIT_BYTES, MAX_CACHE_LIMIT_BYTES)
@@ -1653,11 +1784,14 @@ object AppSettings {
     private const val KEY_QUALITY_DOWNLOAD = "audio_quality_download"
     private const val KEY_DOWNLOAD_NETWORK = "download_network"
     private const val KEY_WIFI_ONLY_DOWNLOADS = "wifi_only_downloads"
+    private const val KEY_ALWAYS_ASK_DOWNLOAD_OPTIONS = "always_ask_download_options"
     private const val KEY_LOSSLESS = "lossless_audio"
     private const val KEY_CROSSFADE = "crossfade_seconds"
     private const val KEY_SMART_FADE = "smart_fade_enabled"
     private const val KEY_SKIP_SILENCE = "skip_silence"
     private const val KEY_SPATIAL_AUDIO = "spatial_audio"
+    private const val KEY_DOLBY_ATMOS_ENABLED = "dolby_atmos_enabled"
+    private const val KEY_AUDIO_LISTENING_MODE = "audio_listening_mode"
     private const val KEY_SPEED = "playback_speed"
     private const val KEY_THEME = "theme_mode"
     private const val KEY_AUTOPLAY = "autoplay"
@@ -1674,6 +1808,7 @@ object AppSettings {
     private const val KEY_ANIMATED_CANVAS = "animated_canvas"
     private const val KEY_CANVAS_OVER_CELLULAR = "canvas_over_cellular"
     private const val KEY_FULL_BLEED_ARTWORK = "full_bleed_artwork"
+    private const val KEY_SHOW_STATUS_BAR_ICON = "show_status_bar_icon"
     private const val KEY_SYNCED_LYRICS = "synced_lyrics"
     private const val KEY_LYRICS_SOURCES = "lyrics_sources"
     private const val KEY_LYRICS_SOURCE_ORDER = "lyrics_source_order"

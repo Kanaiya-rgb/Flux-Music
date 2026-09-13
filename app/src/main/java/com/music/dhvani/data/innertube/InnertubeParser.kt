@@ -392,12 +392,29 @@ object InnertubeParser {
             scope.o("musicPlaylistShelfContinuation") != null ||
             collectRenderers(scope, "musicShelfRenderer").any { it.o("title").runs() == "Suggestions" }
         if (!looksLikePlaylist) return null
-
         val pageCredit = pageCredit(root)
-        val (songs, suggested) = collectRenderers(scope, "musicResponsiveListItemRenderer")
+        val allItems = collectRenderers(scope, "musicResponsiveListItemRenderer")
             .mapNotNull { parseResponsiveListItem(it, pageCredit) }
             .distinctBy { it.videoId }
-            .partition { it.setVideoId != null }
+
+        val (songs, suggested) = if (allItems.any { it.setVideoId != null }) {
+            // Owned playlist: playlist tracks carry playlistSetVideoId; suggestions do not.
+            allItems.partition { it.setVideoId != null }
+        } else {
+            // Public or shared playlist: none carry playlistSetVideoId.
+            // Check for a dedicated suggestions shelf, if any.
+            val suggestionVideoIds = collectRenderers(scope, "musicShelfRenderer")
+                .filter { it.o("title").runs().contains("Suggestions", ignoreCase = true) }
+                .flatMap { collectRenderers(it, "musicResponsiveListItemRenderer") }
+                .mapNotNull { parseResponsiveListItem(it, pageCredit)?.videoId }
+                .toSet()
+
+            if (suggestionVideoIds.isNotEmpty()) {
+                allItems.partition { it.videoId !in suggestionVideoIds }
+            } else {
+                allItems to emptyList()
+            }
+        }
         // The "Suggestions" shelf's own continuation reloads it with a fresh
         // batch rather than paging it (see its "Refresh" button, wired to a
         // `reloadContinuationData` token) — only the real `nextContinuationData`

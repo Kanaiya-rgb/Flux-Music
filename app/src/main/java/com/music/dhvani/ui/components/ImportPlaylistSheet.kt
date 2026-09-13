@@ -23,6 +23,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowForward
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.ContentPaste
 import androidx.compose.material.icons.rounded.FileDownload
@@ -71,6 +72,42 @@ fun ImportPlaylistSheet(
     var directSongs by remember { mutableStateOf<List<Song>?>(null) }
     var isResolving by remember { mutableStateOf(false) }
     var progressText by remember { mutableStateOf("") }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+
+    val resolveInput: (String) -> Unit = { text ->
+        val trimmed = text.trim()
+        errorMessage = null
+        val plId = PlaylistManager.extractPlaylistId(trimmed)
+        if (plId != null) {
+            scope.launch {
+                isResolving = true
+                progressText = "Loading YouTube playlist..."
+                val result = PlaylistManager.fetchYoutubePlaylist(plId)
+                isResolving = false
+                if (result != null && result.second.isNotEmpty()) {
+                    playlistTitle = result.first
+                    directSongs = result.second
+                    parsedTracks = emptyList()
+                    Toast.makeText(context, "Loaded \"${result.first}\" (${result.second.size} tracks)", Toast.LENGTH_SHORT).show()
+                } else {
+                    errorMessage = "Could not load playlist. Please ensure the playlist is public or unlisted."
+                    Toast.makeText(context, "Could not load playlist from link", Toast.LENGTH_SHORT).show()
+                }
+            }
+        } else if (trimmed.contains("#EXTINF") || trimmed.contains("{")) {
+            val parsed = PlaylistManager.parseText(trimmed, "Imported Playlist")
+            if (parsed.tracks.isNotEmpty()) {
+                playlistTitle = parsed.title
+                parsedTracks = parsed.tracks
+                directSongs = null
+                Toast.makeText(context, "Found ${parsed.tracks.size} tracks", Toast.LENGTH_SHORT).show()
+            } else {
+                errorMessage = "No valid tracks found in pasted text."
+            }
+        } else if (trimmed.isNotBlank()) {
+            errorMessage = "Invalid playlist link. Please paste a valid YouTube playlist URL."
+        }
+    }
 
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent(),
@@ -88,13 +125,16 @@ fun ImportPlaylistSheet(
                 playlistTitle = parsed.title
                 parsedTracks = parsed.tracks
                 directSongs = null
+                errorMessage = null
                 if (parsed.tracks.isEmpty()) {
+                    errorMessage = "No tracks found in selected file."
                     Toast.makeText(context, "No tracks found in file", Toast.LENGTH_SHORT).show()
                 } else {
                     Toast.makeText(context, "Found ${parsed.tracks.size} tracks", Toast.LENGTH_SHORT).show()
                 }
             }
         }.onFailure {
+            errorMessage = "Failed to read file: ${it.message}"
             Toast.makeText(context, "Failed to read file: ${it.message}", Toast.LENGTH_SHORT).show()
         }
     }
@@ -143,7 +183,7 @@ fun ImportPlaylistSheet(
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
-                    imageVector = Icons.Rounded.FileUpload,
+                    imageVector = Icons.Rounded.FileDownload,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(22.dp),
@@ -170,71 +210,52 @@ fun ImportPlaylistSheet(
         OutlinedTextField(
             value = inputText,
             onValueChange = { input ->
+                val prev = inputText
                 inputText = input
-                val plId = PlaylistManager.extractPlaylistId(input)
-                if (plId != null) {
-                    // It's a YouTube link
-                    scope.launch {
-                        isResolving = true
-                        progressText = "Loading YouTube playlist..."
-                        val result = PlaylistManager.fetchYoutubePlaylist(plId)
-                        isResolving = false
-                        if (result != null) {
-                            playlistTitle = result.first
-                            directSongs = result.second
-                            parsedTracks = emptyList()
-                            Toast.makeText(context, "Loaded \"${result.first}\" (${result.second.size} tracks)", Toast.LENGTH_SHORT).show()
-                        } else {
-                            Toast.makeText(context, "Could not load playlist from link", Toast.LENGTH_SHORT).show()
-                        }
-                    }
-                } else if (input.contains("#EXTINF") || input.contains("{")) {
-                    val parsed = PlaylistManager.parseText(input, "Imported Playlist")
-                    if (parsed.tracks.isNotEmpty()) {
-                        playlistTitle = parsed.title
-                        parsedTracks = parsed.tracks
-                        directSongs = null
-                    }
+                errorMessage = null
+                // Auto-resolve if pasted a full link or batch text
+                if (input.length - prev.length > 8 || input.startsWith("http") && input.contains("list=")) {
+                    resolveInput(input)
                 }
             },
             placeholder = { Text("Paste YouTube playlist link or M3U text") },
             trailingIcon = {
-                IconButton(onClick = {
-                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                    val clip = clipboard.primaryClip?.getItemAt(0)?.text?.toString().orEmpty()
-                    if (clip.isNotBlank()) {
-                        inputText = clip
-                        val plId = PlaylistManager.extractPlaylistId(clip)
-                        if (plId != null) {
-                            scope.launch {
-                                isResolving = true
-                                progressText = "Loading YouTube playlist..."
-                                val result = PlaylistManager.fetchYoutubePlaylist(plId)
-                                isResolving = false
-                                if (result != null) {
-                                    playlistTitle = result.first
-                                    directSongs = result.second
-                                    parsedTracks = emptyList()
-                                    Toast.makeText(context, "Loaded \"${result.first}\" (${result.second.size} tracks)", Toast.LENGTH_SHORT).show()
-                                }
-                            }
-                        } else {
-                            val parsed = PlaylistManager.parseText(clip, "Imported Playlist")
-                            if (parsed.tracks.isNotEmpty()) {
-                                playlistTitle = parsed.title
-                                parsedTracks = parsed.tracks
-                                directSongs = null
-                            }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (inputText.isNotBlank()) {
+                        IconButton(onClick = { resolveInput(inputText) }) {
+                            Icon(
+                                Icons.AutoMirrored.Rounded.ArrowForward,
+                                contentDescription = "Load",
+                                tint = MaterialTheme.colorScheme.primary,
+                            )
                         }
                     }
-                }) {
-                    Icon(Icons.Rounded.ContentPaste, contentDescription = "Paste", tint = MaterialTheme.colorScheme.primary)
+                    IconButton(onClick = {
+                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                        val clip = clipboard.primaryClip?.getItemAt(0)?.text?.toString().orEmpty()
+                        if (clip.isNotBlank()) {
+                            inputText = clip
+                            resolveInput(clip)
+                        }
+                    }) {
+                        Icon(Icons.Rounded.ContentPaste, contentDescription = "Paste", tint = MaterialTheme.colorScheme.primary)
+                    }
                 }
             },
             shape = RoundedCornerShape(12.dp),
             modifier = Modifier.fillMaxWidth(),
             maxLines = 3,
         )
+
+        if (errorMessage != null) {
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = errorMessage!!,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(horizontal = 4.dp),
+            )
+        }
 
         val totalTracks = directSongs?.size ?: parsedTracks.size
         if (totalTracks > 0) {

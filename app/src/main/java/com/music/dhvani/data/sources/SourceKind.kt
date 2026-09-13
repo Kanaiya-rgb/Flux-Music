@@ -80,6 +80,7 @@ enum class SourceKind(
         canServeLossless = true,
     ),
 
+
     JIOSAAVN(
         label = "JioSaavn",
         detail = "JioSaavn high-quality streams up to 320kbps AAC/MP4. A lossy fallback, tried before YouTube.",

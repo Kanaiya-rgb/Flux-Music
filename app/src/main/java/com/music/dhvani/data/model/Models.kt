@@ -110,7 +110,33 @@ fun formatDurationText(durationMs: Long): String {
 }
 
 /** As [Song.artworkAt], for artwork that isn't a track's. */
-fun String?.artworkAt(px: Int): String? = this?.replace(SIZE_HINT, "w$px-h$px")
+fun String?.artworkAt(px: Int): String? {
+    if (this == null || this.isBlank()) return null
+    var url = this
+    // 1. Google / YouTube Music CDN (e.g. lh3.googleusercontent.com) -> HD 1200+ px
+    if (url.contains("googleusercontent.com") || url.contains("ggpht.com")) {
+        url = if (url.contains("=")) {
+            url.replace(Regex("""=w\d+-h\d+.*"""), "=w$px-h$px-l90-rj")
+                .replace(Regex("""=s\d+.*"""), "=s$px-l90-rj")
+        } else {
+            url.replace(SIZE_HINT, "w$px-h$px")
+        }
+    } else {
+        url = url.replace(SIZE_HINT, "w$px-h$px")
+    }
+    // 2. YouTube Video Thumbnails: upgrade low-res 480x360 to maxres HD (1280x720)
+    if (url.contains("ytimg.com") && px > 360) {
+        url = url.replace("hqdefault.jpg", "maxresdefault.jpg")
+            .replace("sddefault.jpg", "maxresdefault.jpg")
+            .replace("mqdefault.jpg", "maxresdefault.jpg")
+    }
+    // 3. JioSaavn CDN: always fetch full 500x500 HD master
+    if (url.contains("saavncdn.com")) {
+        url = url.replace(Regex("""50x50|150x150"""), "500x500")
+            .replace("http://", "https://")
+    }
+    return url
+}
 
 private val SIZE_HINT = Regex("""w\d+-h\d+""")
 

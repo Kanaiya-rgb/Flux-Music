@@ -4,6 +4,7 @@ import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -14,8 +15,15 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
+import com.music.dhvani.data.settings.AppSettings
+import com.music.dhvani.data.settings.DownloadNetwork
+import com.music.dhvani.data.settings.DownloadQuality
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
@@ -343,7 +351,6 @@ private val SHEET_SHAPE = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
  *
  * The state comes straight from [Downloads] rather than through the caller: it
  * changes while the sheet is open, and threading a flow through the sheet's
- * signature would buy nothing over reading it where it's drawn — the same
  * arrangement the sleep timer row already uses.
  */
 @Composable
@@ -352,9 +359,13 @@ private fun DownloadRow(song: Song, palette: ArtworkPalette, isOffline: Boolean,
     val scope = rememberCoroutineScope()
     val active by Downloads.active.collectAsStateWithLifecycle()
     val saved by Downloads.saved.collectAsStateWithLifecycle()
+    val downloadQuality by AppSettings.downloadQuality.collectAsStateWithLifecycle()
+    val downloadNetwork by AppSettings.downloadNetwork.collectAsStateWithLifecycle()
+    val alwaysAskDownloadOptions by AppSettings.alwaysAskDownloadOptions.collectAsStateWithLifecycle()
+    var showDownloadOptionsDialog by remember { mutableStateOf(false) }
 
     // The record is a claim about a folder the user manages themselves, so it
-    // is checked against the disk rather than trusted — re-checked whenever the
+    // is checked against the disk rather than trusted - re-checked whenever the
     // record for this track changes, which is what makes the row settle onto
     // "Saved" the moment a download finishes.
     //
@@ -411,15 +422,161 @@ private fun DownloadRow(song: Song, palette: ArtworkPalette, isOffline: Boolean,
                 accent = palette.accent,
             ) { scope.launch { Downloads.delete(context, song.videoId) } }
         } else if (!isOffline) {
+            val netLabel = when (downloadNetwork) {
+                DownloadNetwork.BOTH -> "Wi-Fi & Data"
+                DownloadNetwork.WIFI_ONLY -> "Wi-Fi"
+                DownloadNetwork.CELLULAR_ONLY -> "Mobile Data"
+            }
             ActionRow(
                 icon = Icons.Rounded.Download,
                 label = "Download",
+                value = "${downloadQuality.label} • $netLabel",
                 accent = palette.accent,
-                onClick = onDownload,
+                onClick = {
+                    if (alwaysAskDownloadOptions) {
+                        showDownloadOptionsDialog = true
+                    } else {
+                        onDownload()
+                    }
+                },
             )
         }
     }
+
+    if (showDownloadOptionsDialog) {
+        var selectedQuality by remember { mutableStateOf(downloadQuality) }
+        var selectedNetwork by remember { mutableStateOf(downloadNetwork) }
+
+        AlertDialog(
+            onDismissRequest = { showDownloadOptionsDialog = false },
+            title = {
+                Text(
+                    text = "Download Options",
+                    style = MaterialTheme.typography.titleLarge,
+                )
+            },
+            text = {
+                Column(
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Text(
+                        text = "Audio Quality",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    DownloadQuality.entries.forEach { quality ->
+                        val selected = quality == selectedQuality
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(
+                                    if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                                    else Color.Transparent
+                                )
+                                .clickable { selectedQuality = quality }
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = quality.label,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                )
+                                Text(
+                                    text = quality.detail,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            if (selected) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Check,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                )
+                            }
+                        }
+                    }
+
+                    HorizontalDivider(
+                        thickness = 0.5.dp,
+                        color = MaterialTheme.colorScheme.outlineVariant,
+                    )
+
+                    Text(
+                        text = "Network Policy",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    DownloadNetwork.entries.forEach { network ->
+                        val selected = network == selectedNetwork
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(
+                                    if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                                    else Color.Transparent
+                                )
+                                .clickable { selectedNetwork = network }
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = when (network) {
+                                        DownloadNetwork.BOTH -> "Mobile Data & Wi-Fi"
+                                        DownloadNetwork.WIFI_ONLY -> "Wi-Fi Only"
+                                        DownloadNetwork.CELLULAR_ONLY -> "Mobile Data Only"
+                                    },
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                )
+                                Text(
+                                    text = when (network) {
+                                        DownloadNetwork.BOTH -> "Download over any connection"
+                                        DownloadNetwork.WIFI_ONLY -> "Only download on unmetered Wi-Fi"
+                                        DownloadNetwork.CELLULAR_ONLY -> "Only download using cellular data"
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            if (selected) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Check,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        AppSettings.setDownloadQuality(selectedQuality)
+                        AppSettings.setDownloadNetwork(selectedNetwork)
+                        showDownloadOptionsDialog = false
+                        onDownload()
+                    },
+                ) {
+                    Text("Download")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDownloadOptionsDialog = false }) {
+                    Text("Cancel")
+                }
+            },
+        )
+    }
 }
+
 
 /** End of track or a duration, plus a way out once one is running. */
 @Composable

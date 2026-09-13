@@ -246,11 +246,22 @@ object PlaylistManager {
 
     fun extractPlaylistId(input: String): String? {
         val trimmed = input.trim()
-        if (trimmed.startsWith("PL") || trimmed.startsWith("VLPL") || trimmed.startsWith("RDAMPL")) {
+        if (trimmed.isBlank()) return null
+        val listMatch = Regex("""[?&]list=([a-zA-Z0-9_-]+)""").find(trimmed)
+        if (listMatch != null) {
+            return listMatch.groupValues[1].removePrefix("VL")
+        }
+        val browseMatch = Regex("""/browse/([a-zA-Z0-9_-]+)""").find(trimmed)
+        if (browseMatch != null) {
+            return browseMatch.groupValues[1].removePrefix("VL")
+        }
+        if (trimmed.startsWith("VL") && trimmed.length > 4) {
             return trimmed.removePrefix("VL")
         }
-        val match = Regex("""[?&]list=([a-zA-Z0-9_-]+)""").find(trimmed)
-        return match?.groupValues?.get(1)
+        if (trimmed.startsWith("PL") || trimmed.startsWith("RD") || trimmed.startsWith("OLAK5uy") || trimmed.startsWith("MPREb_")) {
+            return trimmed
+        }
+        return null
     }
 
     fun extractVideoId(input: String): String? {
@@ -304,10 +315,38 @@ object PlaylistManager {
     suspend fun fetchYoutubePlaylist(
         playlistId: String,
     ): Pair<String, List<Song>>? = withContext(Dispatchers.IO) {
-        val browseId = if (playlistId.startsWith("VL")) playlistId else "VL$playlistId"
-        val result = YtMusicRepository.browseSongs(browseId).getOrNull() ?: return@withContext null
-        val title = result.header?.title ?: "Imported Playlist"
-        title to result.songs
+        val cleanId = playlistId.removePrefix("VL")
+        val browseId = if (cleanId.startsWith("VL")) cleanId else "VL$cleanId"
+
+        // 1. Try browse with VL prefix
+        var songPage = YtMusicRepository.browseSongs(browseId).getOrNull()
+
+        // 2. Fallback to browse without VL prefix if empty
+        if (songPage == null || songPage.songs.isEmpty()) {
+            val directPage = YtMusicRepository.browseSongs(cleanId).getOrNull()
+            if (directPage != null && directPage.songs.isNotEmpty()) {
+                songPage = directPage
+            }
+        }
+
+        // 3. Fetch full songs if multiple pages exist or fallback to allSongs
+        val songs = if (songPage != null && songPage.songs.isNotEmpty()) {
+            if (songPage.continuation != null) {
+                YtMusicRepository.allSongs(browseId).getOrNull()
+                    ?: YtMusicRepository.allSongs(cleanId).getOrNull()
+                    ?: songPage.songs
+            } else {
+                songPage.songs
+            }
+        } else {
+            YtMusicRepository.allSongs(browseId).getOrNull()
+                ?: YtMusicRepository.allSongs(cleanId).getOrNull()
+                ?: emptyList()
+        }
+
+        if (songs.isEmpty()) return@withContext null
+        val title = songPage?.header?.title?.ifBlank { "YouTube Playlist" } ?: "YouTube Playlist"
+        title to songs
     }
 
     private fun sanitizeFileName(name: String): String {

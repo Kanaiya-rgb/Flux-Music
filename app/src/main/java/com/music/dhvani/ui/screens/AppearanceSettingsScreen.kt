@@ -45,6 +45,7 @@ import androidx.compose.material.icons.rounded.Layers
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.MotionPhotosOff
 import androidx.compose.material.icons.rounded.MusicNote
+import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material.icons.rounded.Speed
@@ -82,8 +83,6 @@ import com.music.dhvani.R
 import com.music.dhvani.data.settings.AppSettings
 import com.music.dhvani.data.settings.DensityScale
 import com.music.dhvani.data.settings.GridItemSize
-import com.music.dhvani.data.settings.LyricsAnimationStyle
-import com.music.dhvani.data.settings.LyricsPosition
 import com.music.dhvani.data.settings.MiniPlayerBackgroundStyle
 import com.music.dhvani.data.settings.PlayerBackgroundStyle
 import com.music.dhvani.data.settings.PlayerButtonsStyle
@@ -123,6 +122,7 @@ fun AppearanceSettingsScreen(
     val cropAlbumArt by AppSettings.cropAlbumArt.collectAsStateWithLifecycle()
     val hideStatusBarOnFullscreen by AppSettings.hideStatusBarOnFullscreen.collectAsStateWithLifecycle()
     val fullBleedArtwork by AppSettings.fullBleedArtwork.collectAsStateWithLifecycle()
+    val showStatusBarIcon by AppSettings.showStatusBarIcon.collectAsStateWithLifecycle()
     val animatedCanvas by AppSettings.animatedCanvas.collectAsStateWithLifecycle()
     val canvasOverCellular by AppSettings.canvasOverCellular.collectAsStateWithLifecycle()
     val reduceAnimation by AppSettings.reduceAnimation.collectAsStateWithLifecycle()
@@ -130,16 +130,6 @@ fun AppearanceSettingsScreen(
 
     val swipeThumbnail by AppSettings.swipeThumbnail.collectAsStateWithLifecycle()
     val swipeSensitivity by AppSettings.swipeSensitivity.collectAsStateWithLifecycle()
-
-    val syncedLyrics by AppSettings.syncedLyrics.collectAsStateWithLifecycle()
-    val lyricsPosition by AppSettings.lyricsPosition.collectAsStateWithLifecycle()
-    val lyricsAnimationStyle by AppSettings.lyricsAnimationStyle.collectAsStateWithLifecycle()
-    val lyricsGlowEffect by AppSettings.lyricsGlowEffect.collectAsStateWithLifecycle()
-    val lyricsTextSize by AppSettings.lyricsTextSize.collectAsStateWithLifecycle()
-    val lyricsLineSpacing by AppSettings.lyricsLineSpacing.collectAsStateWithLifecycle()
-    val lyricsClickSeek by AppSettings.lyricsClickSeek.collectAsStateWithLifecycle()
-    val lyricsAutoScroll by AppSettings.lyricsAutoScroll.collectAsStateWithLifecycle()
-    val respectAgentPositioning by AppSettings.respectAgentPositioning.collectAsStateWithLifecycle()
 
     val defaultOpenTab by AppSettings.defaultOpenTab.collectAsStateWithLifecycle()
     val gridItemSize by AppSettings.gridItemSize.collectAsStateWithLifecycle()
@@ -161,10 +151,6 @@ fun AppearanceSettingsScreen(
     var showMiniPlayerBgDialog by remember { mutableStateOf(false) }
     var showPlayerButtonsDialog by remember { mutableStateOf(false) }
     var showSensitivityDialog by remember { mutableStateOf(false) }
-    var showLyricsPositionDialog by remember { mutableStateOf(false) }
-    var showLyricsAnimDialog by remember { mutableStateOf(false) }
-    var showLyricsTextSizeDialog by remember { mutableStateOf(false) }
-    var showLyricsLineSpacingDialog by remember { mutableStateOf(false) }
     var showDefaultTabDialog by remember { mutableStateOf(false) }
     var showGridSizeDialog by remember { mutableStateOf(false) }
 
@@ -369,6 +355,23 @@ fun AppearanceSettingsScreen(
             }
             RowDivider()
             SettingsRow(
+                icon = Icons.Rounded.Notifications,
+                title = "Status bar playback icon",
+                subtitle = "Show Dhvani logo in status bar while music is playing",
+                trailing = {
+                    Switch(
+                        checked = showStatusBarIcon,
+                        onCheckedChange = AppSettings::setShowStatusBarIcon,
+                        colors = SwitchDefaults.colors(
+                            checkedTrackColor = MaterialTheme.colorScheme.primary,
+                            checkedBorderColor = MaterialTheme.colorScheme.primary,
+                        ),
+                    )
+                },
+                onClick = { AppSettings.setShowStatusBarIcon(!showStatusBarIcon) },
+            )
+            RowDivider()
+            SettingsRow(
                 icon = Icons.Rounded.Animation,
                 title = stringResource(R.string.animated_cover_art),
                 subtitle = stringResource(R.string.animated_cover_art_subtitle),
@@ -461,150 +464,7 @@ fun AppearanceSettingsScreen(
             )
         }
 
-        // ── 4. Lyrics ───────────────────────────────────────────────────
-        SettingsGroup(header = stringResource(R.string.synced_lyrics)) {
-            SettingsRow(
-                icon = Icons.AutoMirrored.Rounded.Notes,
-                title = stringResource(R.string.synced_lyrics),
-                subtitle = stringResource(R.string.synced_lyrics_subtitle),
-                trailing = {
-                    Switch(
-                        checked = syncedLyrics,
-                        onCheckedChange = AppSettings::setSyncedLyrics,
-                        colors = SwitchDefaults.colors(
-                            checkedTrackColor = MaterialTheme.colorScheme.primary,
-                            checkedBorderColor = MaterialTheme.colorScheme.primary,
-                        ),
-                    )
-                },
-                onClick = { AppSettings.setSyncedLyrics(!syncedLyrics) },
-            )
-            if (syncedLyrics) {
-                RowDivider()
-                SettingsRow(
-                    icon = Icons.Rounded.Tune,
-                    title = stringResource(R.string.lyrics_text_position),
-                    subtitle = "Horizontal alignment of sung lyric lines",
-                    value = when (lyricsPosition) {
-                        LyricsPosition.LEFT -> stringResource(R.string.left)
-                        LyricsPosition.CENTER -> stringResource(R.string.center)
-                        LyricsPosition.RIGHT -> stringResource(R.string.right)
-                    },
-                    onClick = { showLyricsPositionDialog = true },
-                )
-                RowDivider()
-                SettingsRow(
-                    icon = Icons.Rounded.AutoAwesome,
-                    title = stringResource(R.string.lyrics_animation_style_title),
-                    subtitle = "Transition effect as lines are highlighted",
-                    value = when (lyricsAnimationStyle) {
-                        LyricsAnimationStyle.NONE -> stringResource(R.string.lyrics_animation_none)
-                        LyricsAnimationStyle.FADE -> stringResource(R.string.lyrics_animation_fade)
-                        LyricsAnimationStyle.SLIDE -> stringResource(R.string.lyrics_animation_slide)
-                        LyricsAnimationStyle.APPLE -> stringResource(R.string.lyrics_animation_apple)
-                        LyricsAnimationStyle.TYPEWRITER -> stringResource(R.string.lyrics_animation_typewriter)
-                        LyricsAnimationStyle.NEON -> stringResource(R.string.lyrics_animation_neon)
-                        LyricsAnimationStyle.GLITCH -> stringResource(R.string.lyrics_animation_glitch)
-                        LyricsAnimationStyle.LIQUID -> stringResource(R.string.lyrics_animation_liquid)
-                        LyricsAnimationStyle.AURORA -> stringResource(R.string.lyrics_animation_aurora)
-                        LyricsAnimationStyle.EMBER -> stringResource(R.string.lyrics_animation_ember)
-                        LyricsAnimationStyle.CHROME -> stringResource(R.string.lyrics_animation_chrome)
-                        LyricsAnimationStyle.CRT -> stringResource(R.string.lyrics_animation_crt)
-                        LyricsAnimationStyle.WAVE -> stringResource(R.string.lyrics_animation_wave)
-                        LyricsAnimationStyle.SMOKE_SIGNAL -> stringResource(R.string.lyrics_animation_smoke_signal)
-                        LyricsAnimationStyle.EQUALIZER -> stringResource(R.string.lyrics_animation_equalizer)
-                        LyricsAnimationStyle.GHOSTWRITE -> stringResource(R.string.lyrics_animation_ghostwrite)
-                    },
-                    onClick = { showLyricsAnimDialog = true },
-                )
-                RowDivider()
-                SettingsRow(
-                    icon = Icons.Rounded.AutoAwesome,
-                    title = stringResource(R.string.lyrics_glow_effect),
-                    subtitle = stringResource(R.string.lyrics_glow_effect_desc),
-                    trailing = {
-                        Switch(
-                            checked = lyricsGlowEffect,
-                            onCheckedChange = AppSettings::setLyricsGlowEffect,
-                            colors = SwitchDefaults.colors(
-                                checkedTrackColor = MaterialTheme.colorScheme.primary,
-                                checkedBorderColor = MaterialTheme.colorScheme.primary,
-                            ),
-                        )
-                    },
-                    onClick = { AppSettings.setLyricsGlowEffect(!lyricsGlowEffect) },
-                )
-                RowDivider()
-                SettingsRow(
-                    icon = Icons.Rounded.Tune,
-                    title = stringResource(R.string.lyrics_text_size),
-                    subtitle = "Font size for lyric playback lines",
-                    value = "${lyricsTextSize.roundToInt()} sp",
-                    onClick = { showLyricsTextSizeDialog = true },
-                )
-                RowDivider()
-                SettingsRow(
-                    icon = Icons.Rounded.Tune,
-                    title = stringResource(R.string.lyrics_line_spacing),
-                    subtitle = "Vertical spacing multiplier between lyric lines",
-                    value = String.format(Locale.US, "%.1fx", lyricsLineSpacing),
-                    onClick = { showLyricsLineSpacingDialog = true },
-                )
-                RowDivider()
-                SettingsRow(
-                    icon = Icons.Rounded.MusicNote,
-                    title = stringResource(R.string.lyrics_click_change),
-                    subtitle = "Jump playback timestamp immediately upon tapping a line",
-                    trailing = {
-                        Switch(
-                            checked = lyricsClickSeek,
-                            onCheckedChange = AppSettings::setLyricsClickSeek,
-                            colors = SwitchDefaults.colors(
-                                checkedTrackColor = MaterialTheme.colorScheme.primary,
-                                checkedBorderColor = MaterialTheme.colorScheme.primary,
-                            ),
-                        )
-                    },
-                    onClick = { AppSettings.setLyricsClickSeek(!lyricsClickSeek) },
-                )
-                RowDivider()
-                SettingsRow(
-                    icon = Icons.Rounded.Speed,
-                    title = stringResource(R.string.lyrics_auto_scroll),
-                    subtitle = "Keep playing lines centered in view automatically",
-                    trailing = {
-                        Switch(
-                            checked = lyricsAutoScroll,
-                            onCheckedChange = AppSettings::setLyricsAutoScroll,
-                            colors = SwitchDefaults.colors(
-                                checkedTrackColor = MaterialTheme.colorScheme.primary,
-                                checkedBorderColor = MaterialTheme.colorScheme.primary,
-                            ),
-                        )
-                    },
-                    onClick = { AppSettings.setLyricsAutoScroll(!lyricsAutoScroll) },
-                )
-                RowDivider()
-                SettingsRow(
-                    icon = Icons.Rounded.Layers,
-                    title = stringResource(R.string.respect_agent_positioning),
-                    subtitle = stringResource(R.string.respect_agent_positioning_desc),
-                    trailing = {
-                        Switch(
-                            checked = respectAgentPositioning,
-                            onCheckedChange = AppSettings::setRespectAgentPositioning,
-                            colors = SwitchDefaults.colors(
-                                checkedTrackColor = MaterialTheme.colorScheme.primary,
-                                checkedBorderColor = MaterialTheme.colorScheme.primary,
-                            ),
-                        )
-                    },
-                    onClick = { AppSettings.setRespectAgentPositioning(!respectAgentPositioning) },
-                )
-            }
-        }
-
-        // ── 5. Navigation & Miscellaneous ───────────────────────────────
+        // ── 4. Navigation & Miscellaneous ───────────────────────────────
         SettingsGroup(header = stringResource(R.string.miscellaneous)) {
             SettingsRow(
                 icon = Icons.Rounded.Dashboard,
@@ -944,192 +804,7 @@ fun AppearanceSettingsScreen(
         )
     }
 
-    // 6. Lyrics Position Dialog
-    if (showLyricsPositionDialog) {
-        AlertDialog(
-            onDismissRequest = { showLyricsPositionDialog = false },
-            title = { Text(stringResource(R.string.lyrics_text_position)) },
-            text = {
-                Column {
-                    LyricsPosition.entries.forEach { pos ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    AppSettings.setLyricsPosition(pos)
-                                    showLyricsPositionDialog = false
-                                }
-                                .padding(vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                text = pos.label,
-                                style = MaterialTheme.typography.bodyLarge,
-                                color = if (lyricsPosition == pos) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                                modifier = Modifier.weight(1f),
-                            )
-                            if (lyricsPosition == pos) {
-                                Icon(
-                                    imageVector = Icons.Rounded.Check,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                )
-                            }
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { showLyricsPositionDialog = false }) {
-                    Text(stringResource(R.string.cancel))
-                }
-            },
-        )
-    }
-
-    // 7. Lyrics Animation Style Dialog
-    if (showLyricsAnimDialog) {
-        AlertDialog(
-            onDismissRequest = { showLyricsAnimDialog = false },
-            title = { Text(stringResource(R.string.lyrics_animation_style_title)) },
-            text = {
-                Column {
-                    LyricsAnimationStyle.entries.forEach { anim ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    AppSettings.setLyricsAnimationStyle(anim)
-                                    showLyricsAnimDialog = false
-                                }
-                                .padding(vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = anim.label,
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    color = if (lyricsAnimationStyle == anim) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                                )
-                                Text(
-                                    text = when (anim) {
-                                        LyricsAnimationStyle.NONE -> "Static plain lyrics without animations"
-                                        LyricsAnimationStyle.FADE -> "Gentle classic opacity fade"
-                                        LyricsAnimationStyle.SLIDE -> "Smooth dynamic horizontal slide-in"
-                                        LyricsAnimationStyle.APPLE -> "Apple Music style energetic syllable bounce"
-                                        LyricsAnimationStyle.TYPEWRITER -> "Mechanical character-by-character typing with caret"
-                                        LyricsAnimationStyle.NEON -> "Electric gas neon sign with buzzing tube flicker & deep glow"
-                                        LyricsAnimationStyle.GLITCH -> "Torn digital video slices with cyan & magenta channel shift"
-                                        LyricsAnimationStyle.LIQUID -> "Hollow glass typography with rising fluid wave meniscus"
-                                        LyricsAnimationStyle.AURORA -> "Living liquid holographic rainbow with shifting hue rotation"
-                                        LyricsAnimationStyle.EMBER -> "Volcanic incandescent magma with molten embers & heat pulse"
-                                        LyricsAnimationStyle.CHROME -> "Liquid metallic mercury with sweeping specular lens glare"
-                                        LyricsAnimationStyle.CRT -> "Retro green phosphor monitor with rolling TV scanlines & flicker"
-                                        LyricsAnimationStyle.WAVE -> "Letters rhythmically dancing up and down in a fluid sine wave"
-                                        LyricsAnimationStyle.SMOKE_SIGNAL -> "Smoldering amber lyrics with rising smoke vapor plumes"
-                                        LyricsAnimationStyle.EQUALIZER -> "Kinetic 5-band audio visualizer frequency bars on words"
-                                        LyricsAnimationStyle.GHOSTWRITE -> "Phantom spectral mist with trailing spirit echoes"
-                                    },
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                            if (lyricsAnimationStyle == anim) {
-                                Icon(
-                                    imageVector = Icons.Rounded.Check,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                )
-                            }
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { showLyricsAnimDialog = false }) {
-                    Text(stringResource(R.string.cancel))
-                }
-            },
-        )
-    }
-
-    // 8. Lyrics Text Size Dialog
-    if (showLyricsTextSizeDialog) {
-        var tempSize by remember { mutableFloatStateOf(lyricsTextSize) }
-        AlertDialog(
-            onDismissRequest = { showLyricsTextSizeDialog = false },
-            title = { Text(stringResource(R.string.lyrics_text_size)) },
-            text = {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        text = "${tempSize.roundToInt()} sp",
-                        style = MaterialTheme.typography.titleLarge,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(bottom = 12.dp),
-                    )
-                    Slider(
-                        value = tempSize,
-                        onValueChange = { tempSize = it },
-                        valueRange = 14f..42f,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    AppSettings.setLyricsTextSize(tempSize)
-                    showLyricsTextSizeDialog = false
-                }) {
-                    Text(stringResource(R.string.ok))
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { tempSize = 24f }) {
-                    Text(stringResource(R.string.reset))
-                }
-            },
-        )
-    }
-
-    // 9. Lyrics Line Spacing Dialog
-    if (showLyricsLineSpacingDialog) {
-        var tempSpacing by remember { mutableFloatStateOf(lyricsLineSpacing) }
-        AlertDialog(
-            onDismissRequest = { showLyricsLineSpacingDialog = false },
-            title = { Text(stringResource(R.string.lyrics_line_spacing)) },
-            text = {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        text = String.format(Locale.US, "%.1fx", tempSpacing),
-                        style = MaterialTheme.typography.titleLarge,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(bottom = 12.dp),
-                    )
-                    Slider(
-                        value = tempSpacing,
-                        onValueChange = { tempSpacing = it },
-                        valueRange = 1.0f..2.5f,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    AppSettings.setLyricsLineSpacing(tempSpacing)
-                    showLyricsLineSpacingDialog = false
-                }) {
-                    Text(stringResource(R.string.ok))
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { tempSpacing = 1.2f }) {
-                    Text(stringResource(R.string.reset))
-                }
-            },
-        )
-    }
-
-    // 10. Density Scale Dialog
+    // 6. Density Scale Dialog
     if (showDensityDialog) {
         AlertDialog(
             onDismissRequest = { showDensityDialog = false },
@@ -1206,7 +881,7 @@ fun AppearanceSettingsScreen(
         )
     }
 
-    // 11. Default Open Tab Dialog
+    // 7. Default Open Tab Dialog
     if (showDefaultTabDialog) {
         val tabNames = listOf("Play", "Explore", "Library", "Search")
         AlertDialog(
@@ -1250,7 +925,7 @@ fun AppearanceSettingsScreen(
         )
     }
 
-    // 12. Grid Size Dialog
+    // 8. Grid Size Dialog
     if (showGridSizeDialog) {
         AlertDialog(
             onDismissRequest = { showGridSizeDialog = false },
