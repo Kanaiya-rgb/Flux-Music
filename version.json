@@ -1,7 +1,7 @@
 {
-  "version": "2.0.6",
-  "versionCode": 26,
-  "releaseUrl": "https://github.com/Kanaiya-rgb/Dhvani-Music/releases/tag/v2.0.6",
-  "apkUrl": "https://github.com/Kanaiya-rgb/Dhvani-Music/releases/download/v2.0.6/DhvaniMusic-v2.0.6.apk",
-  "notes": "v2.0.6: Flexible song download network choices (Mobile Data & Wi-Fi by default), high-reliability CDN-backed update notification engine, accurate offline playback statistics, and 12+ Kinetic Text-Effects Lyrics Engine."
+  "version": "2.0.7",
+  "versionCode": 27,
+  "releaseUrl": "https://github.com/Kanaiya-rgb/Dhvani-Music/releases/tag/v2.0.7",
+  "apkUrl": "https://github.com/Kanaiya-rgb/Dhvani-Music/releases/download/v2.0.7/DhvaniMusic-v2.0.7.apk",
+  "notes": "v2.0.7: Status bar playback icon with appearance toggle, Android 13 Go / 32-bit (armeabi-v7a) compatibility, POST_NOTIFICATIONS runtime prompt, and stream recovery fixes."
 }
